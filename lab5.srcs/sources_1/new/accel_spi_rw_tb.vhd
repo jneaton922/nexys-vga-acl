@@ -80,15 +80,15 @@ begin
 		clk => clk,
 		reset =>  reset,
 		--Values from Accel
-		DATA_X => DATA_X,
-		DATA_Y => DATA_Y,
-		DATA_Z => DATA_Z,
-		ID_AD => ID_AD,
-		ID_1D => ID_1D,
+		data_x => DATA_X,
+		data_y => DATA_Y,
+		data_z => DATA_Z,
+		id_ad => ID_AD,
+		id_1d => ID_1D,
 		--SPI Signals
-		CSb => ACL_CSN,
-		MOSI => ACL_MOSI,
-		SCLK => ACL_SCLK,
-		MISO => ACL_MISO);
+		cs => ACL_CSN,
+		mosi => ACL_MOSI,
+		sclk => ACL_SCLK,
+		miso => ACL_MISO);
 
 end sim;
