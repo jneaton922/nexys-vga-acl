@@ -76,7 +76,7 @@ begin
 		acl_enabled => acl_enabled);
 	
 	--Unit under test
-	ACEL_DUT : entity accel_spi_rw port map (
+	ACEL_DUT : entity acl_spi_rw port map (
 		clk => clk,
 		reset =>  reset,
 		--Values from Accel

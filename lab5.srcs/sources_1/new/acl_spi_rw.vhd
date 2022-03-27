@@ -2,6 +2,7 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 entity acl_spi_rw is
     Port(
@@ -29,12 +30,21 @@ architecture arch of acl_spi_rw is
     signal SPIdone  : std_logic; -- acknowledge from SPI back to command
 
     signal toSPIbytes : std_logic_vector(23 downto 0); -- three byte commands ~= <command address data>
+    signal fromSPIbyte : std_logic_vector(7 downto 0);
 
     -- timer signals
     signal tim_start : std_logic;
     signal tim_done : std_logic;
-    signal tim_max : unsigned(6 downto 0);
-    signal tim_cntr : unsigned(6 downto 0); 
+
+    -- need 17 bits for 100 ms timer @ 100MHz
+    signal tim_max : unsigned(16 downto 0);
+    signal tim_cntr : unsigned(16 downto 0); 
+
+    signal sclkCntr : unsigned(4 downto 0);
+
+    -- 23-bit shift registers for serdes
+    signal sr_p2s : std_logic_vector(23 downto 0) := x"000000";
+    signal sr_s2p : std_logic_vector(23 downto 0) := x"000000";
 
     -- states defined in Hints document
     type command_state_type is (
@@ -43,15 +53,13 @@ architecture arch of acl_spi_rw is
     signal command_state: command_state_type;
 
     type spi_state_type is (
-        idle, setCSlow, clkH, clkL, clkInc, chkCnt, setCShi, wait100
-    );
-    signal spi_state : spi_state type;
+        idle, setCSlow, clkH, clkL, clkInc, chkCnt, setCShi, wait100);
+    signal spi_state : spi_state_type;
+
 begin
     
     -- Command FSM --
     -- cycle through startup, read IDs, x,y,z
-
-
     -- fsm from lab5 hints, following FSM template from slides
     Command_FSM : process (clk, reset)
     begin
@@ -68,7 +76,7 @@ begin
                 
                 -- queue up start up command
                 when idle =>
-                    toSPIbytes <= x"0a2d02" -- write 02 2d for power up
+                    toSPIbytes <= x"0a2d02"; -- write 02 2d for power up
                     SPIstart <= '1';
                     command_state <= writeAddr2d;
 
@@ -95,6 +103,7 @@ begin
                     toSPIbytes <= x"0b0100";
                     SPIstart <= '1';
                     command_state <= readAddr01;
+                    id_ad <= fromSPIbyte;
 
                 -- wait for SPI to finish
                 when readAddr01 =>
@@ -107,6 +116,7 @@ begin
                     toSPIbytes <= x"0b0800";
                     SPIstart <= '1';
                     command_state <= readAddr08;
+                    id_1d <= fromSPIbyte;
                 
                 --wait for SPI to finish
                 when readAddr08 =>
@@ -119,6 +129,7 @@ begin
                     toSPIbytes <= x"0b0900";
                     SPIstart <= '1';
                     command_state <= readAddr09;
+                    data_x <= fromSPIbyte;
                 
                 --wait for SPI to finish
                 when readAddr09 =>
@@ -127,10 +138,11 @@ begin
                     end if;
                 
                 -- queue up Z read
-                when captureY
+                when captureY =>
                     toSPIbytes <= x"0b0a00";
                     SPIstart <= '1';
                     command_state <= readAddr0A;
+                    data_y <= fromSPIbyte;
 
                 --wait for SPI to finish
                 when readAddr0A =>
@@ -143,11 +155,11 @@ begin
                     toSPIbytes <= x"0b0000";
                     SPIstart <= '1';
                     command_state <= readAddr00;
+                    data_z <= fromSPIbyte;
 
             end case;
         end if;
     end process;
-                
 
     -- SPI FSM --
     -- drive cs/sclk with appropriate timing 
@@ -164,18 +176,23 @@ begin
                 when idle =>
                     cs <= '1';
                     sclk <= '0';
+                    SPIdone <= '0';
                     if spistart = '1' then
                         spi_state <= setCSlow;
+                    else
+                        spi_state <= idle;
                     end if;
 
                 when setCSlow =>
-                    cs <= '0' -- enable the acl
+                    cs <= '0'; -- enable the acl
             
                     -- start timer to ensure Css > 100 ns (150 here)
                     tim_start <='1';
-                    tim_max <= 15;
+                    tim_max <= to_unsigned(15,17);
                     if (tim_done = '1') then
                         spi_state <= clkH;
+                    else 
+                        spi_state <= setCSlow;
                     end if;
 
                 when clkH =>
@@ -183,10 +200,12 @@ begin
 
                     -- spend 50 cycles high
                     tim_start <= '1';
-                    tim_max <= 49;
+                    tim_max <= to_unsigned(49,17);
                     if(tim_done = '1') then
                         spi_state <= clkL;
                         tim_start <= '0';
+                    else
+                        spi_state <= clkH;
                     end if;
 
                 when clkL =>
@@ -194,20 +213,43 @@ begin
 
                     -- spend 50 cycles low
                     tim_start <= '1';
-                    tim_max <= 49;
+                    tim_max <= to_unsigned(47,17);
                     if(tim_done = '1') then
-                        spi_state <= clkL;
+                        spi_state <= clkInc;
                         tim_start <= '0';
+                    else 
+                        spi_state <= clkL;
                     end if;
 
                 when clkInc =>
+                    sclkCntr <= sclkCntr + 1;
+                    spi_state <= chkCnt;
                 when chkCnt =>
-                when setCShit =>
+                    if sclkCntr < 24 then
+                        spi_state <= setCShi;
+                        sclkCntr <= (others => '0');
+                    else
+                        spi_state <= clkH;
+                    end if;
+
+                when setCShi =>
+                    cs <= '1';
+                    spi_state <= wait100;
                 when wait100 =>
+                    tim_start <= '1';
+                    tim_max <= to_unsigned(100000,17); -- 100 ms;
+                    if (tim_done = '1') then
+                        spi_state <= idle;
+                        tim_start <= '0';
+                        sclkCntr <= (others => '0');
+                        SPIdone <= '1';
+                    else 
+                        spi_state <= wait100;
+                        cs <= '1';
+                    end if;
             end case;
         end if;
     end process;
-
 
     -- timer process from slides
     timerFSM : process (clk, reset)
@@ -216,8 +258,8 @@ begin
             tim_cntr <= (others => '0');
         elsif rising_edge(clk) then
             if (tim_start = '1') then
-                if (cntr < tim_max) then 
-                    tim_cntr <= cntr + 1;
+                if (tim_cntr < tim_max) then 
+                    tim_cntr <= tim_cntr + 1;
                 else 
                     tim_cntr <= (others => '0');
                 end if;
@@ -229,14 +271,36 @@ begin
     tim_done <= '1' when tim_cntr = tim_max else '0';
 
 
+    -- shift "toSPIbytes" onto MOSI at appropriate times per SPI protocol
     parallel2serial : process (clk, reset)
     begin
-
+        if reset = '1' then
+        
+        elsif rising_edge(clk) then
+            if spistart = '1' then
+                sr_p2s <= toSPIbytes;
+            elsif spi_state = clkH and tim_done = '1' then 
+               mosi <= sr_p2s(23);
+               sr_p2s(23 downto 1) <= sr_p2s(22 downto 0);
+               sr_p2s(0) <= sr_p2s(23);
+            end if;
+        end if;
     end process;
 
+    -- read MISO into data registers depending on FSM states
     serial2parallel : process (clk, reset)
     begin
-
+        if reset = '1' then
+           sr_s2p <= x"000000";
+           fromSPIbyte <= x"00";
+        elsif rising_edge(clk) then
+            -- shift in MISO on SCLK
+            if spi_state = chkCnt and sclkCntr < 24 then
+                sr_s2p(23 downto 1) <= sr_s2p(22 downto 0);
+                sr_s2p(0) <= miso;
+            end if;
+            fromSPIbyte <= sr_s2p(7 downto 0);
+        end if; 
     end process;
 end arch;
 
