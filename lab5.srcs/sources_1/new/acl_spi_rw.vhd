@@ -17,9 +17,9 @@ entity acl_spi_rw is
         id_1d : out std_logic_vector(7 downto 0); --value in 0x01, device id (1d)
 
         -- spi signals
-        cs : out std_logic; -- chip-select
-        mosi : out std_logic; -- master-out (slave in)
-        sclk : out std_logic; -- spi clock (1 MHz)
+        cs : out std_logic := '1'; -- chip-select (active low)
+        mosi : out std_logic := '0'; -- master-out (slave in)
+        sclk : out std_logic := '0'; -- spi clock (1 MHz)
         miso : in std_logic -- master-in (slave-out)
     );
 end acl_spi_rw;
@@ -30,7 +30,6 @@ architecture arch of acl_spi_rw is
     signal SPIdone  : std_logic; -- acknowledge from SPI back to command
 
     signal toSPIbytes : std_logic_vector(23 downto 0); -- three byte commands ~= <command address data>
-    signal fromSPIbyte : std_logic_vector(7 downto 0);
 
     -- timer signals
     signal tim_start : std_logic;
@@ -40,7 +39,7 @@ architecture arch of acl_spi_rw is
     signal tim_max : unsigned(16 downto 0);
     signal tim_cntr : unsigned(16 downto 0); 
 
-    signal sclkCntr : unsigned(4 downto 0);
+    signal sclkCntr : unsigned(4 downto 0) := (others => '0');
 
     -- 23-bit shift registers for serdes
     signal sr_p2s : std_logic_vector(23 downto 0) := x"000000";
@@ -103,7 +102,7 @@ begin
                     toSPIbytes <= x"0b0100";
                     SPIstart <= '1';
                     command_state <= readAddr01;
-                    id_ad <= fromSPIbyte;
+                    id_ad <= sr_s2p(7 downto 0);
 
                 -- wait for SPI to finish
                 when readAddr01 =>
@@ -116,7 +115,7 @@ begin
                     toSPIbytes <= x"0b0800";
                     SPIstart <= '1';
                     command_state <= readAddr08;
-                    id_1d <= fromSPIbyte;
+                    id_1d <= sr_s2p(7 downto 0);
                 
                 --wait for SPI to finish
                 when readAddr08 =>
@@ -129,7 +128,7 @@ begin
                     toSPIbytes <= x"0b0900";
                     SPIstart <= '1';
                     command_state <= readAddr09;
-                    data_x <= fromSPIbyte;
+                    data_x <= sr_s2p(7 downto 0);
                 
                 --wait for SPI to finish
                 when readAddr09 =>
@@ -142,7 +141,7 @@ begin
                     toSPIbytes <= x"0b0a00";
                     SPIstart <= '1';
                     command_state <= readAddr0A;
-                    data_y <= fromSPIbyte;
+                    data_y <= sr_s2p(7 downto 0);
 
                 --wait for SPI to finish
                 when readAddr0A =>
@@ -155,7 +154,7 @@ begin
                     toSPIbytes <= x"0b0000";
                     SPIstart <= '1';
                     command_state <= readAddr00;
-                    data_z <= fromSPIbyte;
+                    data_z <= sr_s2p(7 downto 0);
 
             end case;
         end if;
@@ -165,6 +164,8 @@ begin
     -- drive cs/sclk with appropriate timing 
     -- when triggered by SPIstart   
     SPI_FSM : process(clk, reset)
+
+
     begin
         if reset = '1' then
             spi_state <= idle;
@@ -177,7 +178,7 @@ begin
                     cs <= '1';
                     sclk <= '0';
                     SPIdone <= '0';
-                    if spistart = '1' then
+                    if SPIstart = '1' then
                         spi_state <= setCSlow;
                     else
                         spi_state <= idle;
@@ -222,12 +223,11 @@ begin
                     end if;
 
                 when clkInc =>
-                    sclkCntr <= sclkCntr + 1;
                     spi_state <= chkCnt;
                 when chkCnt =>
-                    if sclkCntr < 24 then
+
+                    if sclkCntr >= 24 then
                         spi_state <= setCShi;
-                        sclkCntr <= (others => '0');
                     else
                         spi_state <= clkH;
                     end if;
@@ -237,16 +237,16 @@ begin
                     spi_state <= wait100;
                 when wait100 =>
                     tim_start <= '1';
-                    tim_max <= to_unsigned(100000,17); -- 100 ms;
+                    tim_max <= to_unsigned(100,17); -- 100 ms, shorter for sim;
                     if (tim_done = '1') then
                         spi_state <= idle;
                         tim_start <= '0';
-                        sclkCntr <= (others => '0');
                         SPIdone <= '1';
                     else 
                         spi_state <= wait100;
                         cs <= '1';
                     end if;
+                    
             end case;
         end if;
     end process;
@@ -271,14 +271,31 @@ begin
     tim_done <= '1' when tim_cntr = tim_max else '0';
 
 
+    -- counter for sclk to ensure only 24 cycles per protocol
+    sclkCnt : process (clk, reset)
+    begin
+        if reset = '1' then
+            -- reset
+            sclkCntr <= (others => '0');
+        elsif rising_edge(clk) then
+            if (spi_state = clkInc) then
+                sclkCntr <= sclkCntr + 1;
+            elsif spi_state = wait100 then
+                sclkCntr <= (others => '0');
+            end if;
+        end if;
+
+    end process;
+
     -- shift "toSPIbytes" onto MOSI at appropriate times per SPI protocol
     parallel2serial : process (clk, reset)
     begin
         if reset = '1' then
-        
+            sr_p2s <= x"000000";
+            mosi <= '0';
         elsif rising_edge(clk) then
-            if spistart = '1' then
-                sr_p2s <= toSPIbytes;
+            if SPIstart = '1' then
+               sr_p2s <= toSPIbytes;
             elsif spi_state = clkH and tim_done = '1' then 
                mosi <= sr_p2s(23);
                sr_p2s(23 downto 1) <= sr_p2s(22 downto 0);
@@ -292,14 +309,12 @@ begin
     begin
         if reset = '1' then
            sr_s2p <= x"000000";
-           fromSPIbyte <= x"00";
         elsif rising_edge(clk) then
             -- shift in MISO on SCLK
-            if spi_state = chkCnt and sclkCntr < 24 then
+            if spi_state = chkCnt and sclkCntr <= 24 then
                 sr_s2p(23 downto 1) <= sr_s2p(22 downto 0);
                 sr_s2p(0) <= miso;
             end if;
-            fromSPIbyte <= sr_s2p(7 downto 0);
         end if; 
     end process;
 end arch;
