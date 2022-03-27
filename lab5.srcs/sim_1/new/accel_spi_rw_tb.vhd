@@ -9,6 +9,7 @@ use IEEE.std_logic_1164.all;
 use IEEE.std_logic_arith.all;
 use IEEE.std_logic_unsigned.all;
 use IEEE.std_logic_textio.all;
+use IEEE.NUMERIC_STD.ALL;
 use work.all;
 
 entity accel_spi_rw_tb is
@@ -58,9 +59,60 @@ begin
 		--TODO: Add Verification for DATA_X, Y, Z, and ID_AD/1D
 		--TODO: Verify acl_enabled goes high after initial write
 		--			This can be done through the waveform viewer or by writing checks in the testbench
-		
 		wait;
 	end process;
+
+	-- ensure CS is low at least 100 ns before SCLK is driven
+	-- ensure CS stays high for 20 ns before falling again
+	-- ensure CS hold of 20 ns
+	verify_CS : process
+		variable CS_low : time;
+		variable CS_high : time;
+	begin
+		-- Css
+		wait until ACL_CSN'EVENT and ACL_CSN = '0';   
+		CS_low := now;  
+		wait until ACL_SCLK'EVENT and ACL_SCLK='1';   
+		assert (now - CS_low >= 100 ns) report "CS setup time violation" severity warning;
+		
+		-- tCSD/tCSH
+		wait until ACL_CSN'EVENT and ACL_CSN = '1';
+		CS_high := now;
+		assert (ACL_SCLK'stable(20 ns) and ACL_SCLK = '0') report "CS hold time violation" severity warning;
+		wait until ACL_CSN'EVENT and ACL_CSN = '0';
+		assert (now - CS_high >= 20 ns) report "CS disable time violation" severity warning;
+	end process;
+
+	-- measure up/down time of sclk, ensure frequency in valid range
+	verify_sclk : process
+		variable clkH : time;
+		variable clkL : time;
+	begin
+		wait until ACL_SCLK'EVENT and ACL_SCLK='1'; -- clock goes high
+		clkH := now;
+		wait until ACL_SCLK'EVENT and ACL_SCLK='0';
+		assert (now - clkH >= 50 ns) report "tHIGH < 50 ns clock high time violation" severity warning;
+		clkL := now;
+		wait until ACL_SCLK'EVENT and ACL_SCLK='1';
+		assert (now - clkL >= 50 ns) report "tLOW  < 50 ns clock low time violation" severity warning;
+		assert (now - clkH > 125 ns ) report "fclk > 8MHz clock frequency violation" severity warning;
+		assert (now - clkH < 416 us) report "fclk < 2.4KHz clock frequency violation" severity warning;
+	end process;
+
+	-- ensure MOSI has been stable for tsu before sclk transition, and stays stable for hold time
+	verify_mosi : process
+		variable t_sample : time;
+	begin
+		wait until ACL_SCLK'EVENT and ACL_SCLK='1' and ACL_CSN = '0';
+		assert (ACL_MOSI'stable(20 ns)) report "tsu < 20ns data setup time violation" severity warning;
+		t_sample := now;
+		wait until ACL_MOSI'EVENT;
+		assert (now - t_sample >= 20 ns) report "thd < 20 ns data hold time violation" severity warning;
+	end process;
+
+
+
+
 	
 	--ACL Model
 	ACL_DUMMY : entity acl_model port map (
