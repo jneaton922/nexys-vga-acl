@@ -111,12 +111,18 @@ architecture arch of lab5_top is
     signal l_db : std_logic := '0';
     signal r_db : std_logic := '0';
 
+    -- debounced accelerometer pulses
+    signal acl_xinc : std_logic := '0';
+    signal acl_xdec : std_logic := '0';
+    signal acl_yinc : std_logic := '0';
+    signal acl_ydec : std_logic := '0';
+
     -- accelerometer data
-    signal DATA_X : std_logic_vector(7 downto 0) :=x"00";
-    signal DATA_Y : std_logic_vector(7 downto 0):=x"00";
-    signal DATA_Z : std_logic_vector(7 downto 0):=x"00";
-    signal ID_AD : std_logic_vector(7 downto 0):=x"00";
-    signal ID_1D : std_logic_vector(7 downto 0):=x"00";
+    signal DATA_X : std_logic_vector(7 downto 0) := x"00";
+    signal DATA_Y : std_logic_vector(7 downto 0):= x"00";
+    signal DATA_Z : std_logic_vector(7 downto 0):= x"00";
+    signal ID_AD : std_logic_vector(7 downto 0):= x"00";
+    signal ID_1D : std_logic_vector(7 downto 0):= x"00";
 
 begin
 
@@ -188,7 +194,7 @@ begin
     accel_spi_rw : entity acl_spi_rw port map (
 		clk => clk,
 		reset =>  reset,
-		--Values from Accel
+		--Values from Accelerometer
 		data_x => DATA_X,
 		data_y => DATA_Y,
 		data_z => DATA_Z,
@@ -201,9 +207,34 @@ begin
 		miso => ACL_MISO 
     );
 
-    
-    -- monitors debounce states and updates red block position accordingly
-    PUSHBUTTON_monitor : process (clk, RESET_SW)
+    -- just treating the relevant acl bits as debouncable buttons for some code reuse
+    xinc : entity work.debounce port map (
+        clk => clk,
+        rst => reset,
+        button_state => DATA_X(7),
+        debounced => acl_xinc
+    );
+    xdec : entity work.debounce port map (
+        clk => clk,
+        rst => reset,
+        button_state => DATA_X(6),
+        debounced => acl_xdec
+    );
+    yinc : entity work.debounce port map (
+        clk => clk,
+        rst => reset,
+        button_state => DATA_Y(7),
+        debounced => acl_yinc
+    );
+    ydec : entity work.debounce port map (
+        clk => clk,
+        rst => reset,
+        button_state => DATA_Y(6),
+        debounced => acl_ydec
+    );
+
+        
+    top : process (clk, RESET_SW)
     begin
         if (RESET_SW = '1') then
             -- pass along the reset signal
@@ -214,50 +245,83 @@ begin
             blocky <= x"07";
 
         elsif (rising_edge(clk)) then
-            -- x,y limits are 0,0 to 19,14
-
-            -- top level do stuff
             reset <= '0';
 
-            if (u_db = '1') then
-                -- decrement y, wrap at 0
-                if (blocky > 0) then
-                    blocky <= blocky - 1;
-                else
-                    blocky <= x"0e";
+            if (ACL_EN ='0') then
+                -- monitors debounce states and updates red block position accordingly
+                if (u_db = '1') then
+                    -- decrement y, wrap at 0
+                    if (blocky > 0) then
+                        blocky <= blocky - 1;
+                    else
+                        blocky <= x"0e";
+                    end if;
                 end if;
-            end if;
 
-            if (d_db = '1') then
-                -- increment y, stop at 14
-                if (blocky < 14) then
-                    blocky <= blocky + 1;
-                else
-                    blocky <= x"00";
+                if (d_db = '1') then
+                    -- increment y, stop at 14
+                    if (blocky < 14) then
+                        blocky <= blocky + 1;
+                    else
+                        blocky <= x"00";
+                    end if;
                 end if;
-            end if;
 
-            if (l_db = '1') then
-                -- decrement x, wrap to 19 at 0
-                if (blockx > 0) then
-                    blockx <= blockx - 1;
-                else
-                    blockx <= x"13";
+                if (l_db = '1') then
+                    -- decrement x, wrap to 19 at 0
+                    if (blockx > 0) then
+                        blockx <= blockx - 1;
+                    else
+                        blockx <= x"13";
+                    end if;
                 end if;
-            end if;
 
-            if (r_db = '1') then
-                -- increment x, wrap to 0 at 19
-                if (blockx < 19) then
-                    blockx <= blockx + 1;
-                else
-                    blockx <= x"00";
+                if (r_db = '1') then
+                    -- increment x, wrap to 0 at 19
+                    if (blockx < 19) then
+                        blockx <= blockx + 1;
+                    else
+                        blockx <= x"00";
+                    end if;
+                end if;
+
+            else 
+                -- set red block coordinates by ACL data
+                if (acl_xinc = '1') then
+                    -- increment x, wrap to 0 at 19
+                    if (blockx < 19) then
+                        blockx <= blockx + 1;
+                    else
+                        blockx <= x"00";
+                    end if;
+                elsif acl_xdec = '1' then
+                    -- decrement x, wrap to 19 at 0
+                    if (blockx > 0) then
+                        blockx <= blockx - 1;
+                    else
+                        blockx <= x"13";
+                    end if;
+                end if;
+
+                if acl_yinc = '1' then 
+                    -- increment y, stop at 14
+                    if (blocky < 14) then
+                        blocky <= blocky + 1;
+                    else
+                        blocky <= x"00";
+                    end if;
+                elsif acl_ydec = '1' then
+                    -- decrement y, wrap at 0
+                    if (blocky > 0) then
+                        blocky <= blocky - 1;
+                    else
+                        blocky <= x"0e";
+                    end if;
                 end if;
             end if;
 
         end if;
     end process;
-
 
     -- 7 segment display character assignment
 
@@ -273,6 +337,7 @@ begin
     c7 <= ID_AD(3 downto 0) when DISP = "00" else "0000";
 
     -- assign 5,4 based on listed requirements
+    -- will be either xdata, ydata, zdata, or id1d (addr 0x01)
     with DISP select
         c6 <= DATA_X(7 downto 4) when "01",
               DATA_Y(7 downto 4) when "10",
@@ -286,7 +351,7 @@ begin
             ID_1D(3 downto 0) when others;
 
 
-
+    -- buttons to LEDs for sanity check on debounce/press
     LED(0) <= BTNU;
     LED(1) <= BTND;
     LED(2) <= BTNL;
