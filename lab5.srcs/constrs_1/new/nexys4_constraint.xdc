@@ -6,11 +6,10 @@
 ## Clock signal
 set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { clk }]; #IO_L12P_T1_MRCC_35 Sch=clk100mhz
 create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports {clk}];
-set_property CFGBVS Vcco [current_design]
-set_property config_voltage 2.5 [current_design]
+set_property CFGBVS Vcco [current_design];
+set_property config_voltage 2.5 [current_design];
 
 ##Switches
-
 set_property -dict { PACKAGE_PIN J15   IOSTANDARD LVCMOS33 } [get_ports { RESET_SW }]; #IO_L24N_T3_RS0_15 Sch=sw[0]
 set_property -dict { PACKAGE_PIN L16   IOSTANDARD LVCMOS33 } [get_ports { ACL_EN }]; #IO_L3N_T0_DQS_EMCCLK_14 Sch=sw[1]
 # set_property -dict { PACKAGE_PIN M13   IOSTANDARD LVCMOS33 } [get_ports { SW[2] }]; #IO_L6N_T0_D08_VREF_14 Sch=sw[2]

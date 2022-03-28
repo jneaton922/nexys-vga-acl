@@ -21,6 +21,8 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+use work.all;
 
 -- Uncomment the following library declaration if using
 -- arithmetic functions with Signed or Unsigned values
@@ -69,13 +71,16 @@ entity lab5_top is
     AN : out STD_LOGIC_VECTOR (7 downto 0);
 
     -- LEDS
-    LED : out std_logic_vector(3 downto 0)  
+    LED : out std_logic_vector(3 downto 0);  
 
     -- spi interface to accelerometer
     ACL_CSN : out std_logic;
     ACL_MOSI : out std_logic;
     ACL_SCLK : out std_logic;
     ACL_MISO : in std_logic );
+
+    
+
 end lab5_top;
 
 architecture arch of lab5_top is
@@ -105,6 +110,13 @@ architecture arch of lab5_top is
     signal d_db : std_logic := '0';
     signal l_db : std_logic := '0';
     signal r_db : std_logic := '0';
+
+    -- accelerometer data
+    signal DATA_X : std_logic_vector(7 downto 0) :=x"00";
+    signal DATA_Y : std_logic_vector(7 downto 0):=x"00";
+    signal DATA_Z : std_logic_vector(7 downto 0):=x"00";
+    signal ID_AD : std_logic_vector(7 downto 0):=x"00";
+    signal ID_1D : std_logic_vector(7 downto 0):=x"00";
 
 begin
 
@@ -186,8 +198,10 @@ begin
 		cs => ACL_CSN,
 		mosi => ACL_MOSI,
 		sclk => ACL_SCLK,
-		miso => ACL_MISO );
+		miso => ACL_MISO 
+    );
 
+    
     -- monitors debounce states and updates red block position accordingly
     PUSHBUTTON_monitor : process (clk, RESET_SW)
     begin
@@ -242,14 +256,36 @@ begin
             end if;
 
         end if;
-
     end process;
 
+
+    -- 7 segment display character assignment
+
+    --X,Y is always on char 4 through 0
     c2 <= std_logic_vector(blocky(7 downto 4));
     c1 <= std_logic_vector(blocky(3 downto 0));
 
     c4 <= std_logic_vector(blockx(7 downto 4));
     c3 <= std_logic_vector(blockx(3 downto 0));
+
+    -- 7,6 is IDAD (addr 0x00) when 00, else zeroes 
+    c8 <= ID_AD(7 downto 4) when DISP = "00" else "0000";
+    c7 <= ID_AD(3 downto 0) when DISP = "00" else "0000";
+
+    -- assign 5,4 based on listed requirements
+    with DISP select
+        c6 <= DATA_X(7 downto 4) when "01",
+              DATA_Y(7 downto 4) when "10",
+              DATA_Z(7 downto 4) when "11",
+              ID_1D(7 downto 4) when others;
+    
+    with DISP select
+        c5 <= DATA_X(3 downto 0) when "01",
+            DATA_Y(3 downto 0) when "10",
+            DATA_Z(3 downto 0) when "11",
+            ID_1D(3 downto 0) when others;
+
+
 
     LED(0) <= BTNU;
     LED(1) <= BTND;

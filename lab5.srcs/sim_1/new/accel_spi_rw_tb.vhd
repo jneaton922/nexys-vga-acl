@@ -110,9 +110,6 @@ begin
 		assert (now - t_sample >= 20 ns) report "thd < 20 ns data hold time violation" severity warning;
 	end process;
 
-
-
-
 	
 	--ACL Model
 	ACL_DUMMY : entity acl_model port map (

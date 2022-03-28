@@ -3,6 +3,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.all;
 
 entity acl_spi_rw is
     Port(
@@ -35,9 +36,9 @@ architecture arch of acl_spi_rw is
     signal tim_start : std_logic;
     signal tim_done : std_logic;
 
-    -- need 17 bits for 100 ms timer @ 100MHz
-    signal tim_max : unsigned(16 downto 0);
-    signal tim_cntr : unsigned(16 downto 0); 
+    -- need 24 bits for 100 ms timer @ 100MHz
+    signal tim_max : unsigned(23 downto 0);
+    signal tim_cntr : unsigned(23 downto 0); 
 
     signal sclkCntr : unsigned(4 downto 0) := (others => '0');
 
@@ -189,7 +190,7 @@ begin
             
                     -- start timer to ensure Css > 100 ns (150 here)
                     tim_start <='1';
-                    tim_max <= to_unsigned(15,17);
+                    tim_max <= to_unsigned(15,24);
                     if (tim_done = '1') then
                         spi_state <= clkH;
                     else 
@@ -201,7 +202,7 @@ begin
 
                     -- spend 50 cycles high
                     tim_start <= '1';
-                    tim_max <= to_unsigned(49,17);
+                    tim_max <= to_unsigned(49,24);
                     if(tim_done = '1') then
                         spi_state <= clkL;
                         tim_start <= '0';
@@ -214,7 +215,7 @@ begin
 
                     -- spend 50 cycles low
                     tim_start <= '1';
-                    tim_max <= to_unsigned(47,17);
+                    tim_max <= to_unsigned(47,24);
                     if(tim_done = '1') then
                         spi_state <= clkInc;
                         tim_start <= '0';
@@ -237,7 +238,7 @@ begin
                     spi_state <= wait100;
                 when wait100 =>
                     tim_start <= '1';
-                    tim_max <= to_unsigned(100,17); -- 100 ms, shorter for sim;
+                    tim_max <= to_unsigned(10000000,24); -- 100 ms, shorter for sim;
                     if (tim_done = '1') then
                         spi_state <= idle;
                         tim_start <= '0';
@@ -292,17 +293,16 @@ begin
     begin
         if reset = '1' then
             sr_p2s <= x"000000";
-            mosi <= '0';
         elsif rising_edge(clk) then
             if SPIstart = '1' then
                sr_p2s <= toSPIbytes;
             elsif spi_state = clkH and tim_done = '1' then 
-               mosi <= sr_p2s(23);
                sr_p2s(23 downto 1) <= sr_p2s(22 downto 0);
                sr_p2s(0) <= sr_p2s(23);
             end if;
         end if;
     end process;
+    mosi <= sr_p2s(23);
 
     -- read MISO into data registers depending on FSM states
     serial2parallel : process (clk, reset)
@@ -311,7 +311,7 @@ begin
            sr_s2p <= x"000000";
         elsif rising_edge(clk) then
             -- shift in MISO on SCLK
-            if spi_state = chkCnt and sclkCntr <= 24 then
+            if spi_state = chkCnt and sclkCntr < 24 then
                 sr_s2p(23 downto 1) <= sr_s2p(22 downto 0);
                 sr_s2p(0) <= miso;
             end if;
