@@ -124,6 +124,13 @@ architecture arch of lab5_top is
     signal ID_AD : std_logic_vector(7 downto 0):= x"00";
     signal ID_1D : std_logic_vector(7 downto 0):= x"00";
 
+    signal ytilt_flag : std_logic := '0';
+    signal xtilt_flag : std_logic := '0';
+
+    -- capture unsigned accelerometer data for threshold comparison
+    signal currx : signed(7 downto 0);
+    signal curry : signed(7 downto 0);
+
 begin
 
     seg7 : entity work.seg7_controller port map (
@@ -207,32 +214,6 @@ begin
 		miso => ACL_MISO 
     );
 
-    -- just treating the relevant acl bits as debouncable buttons for some code reuse
-    xinc : entity work.debounce port map (
-        clk => clk,
-        rst => reset,
-        button_state => DATA_X(7),
-        debounced => acl_xinc
-    );
-    xdec : entity work.debounce port map (
-        clk => clk,
-        rst => reset,
-        button_state => DATA_X(6),
-        debounced => acl_xdec
-    );
-    yinc : entity work.debounce port map (
-        clk => clk,
-        rst => reset,
-        button_state => DATA_Y(7),
-        debounced => acl_yinc
-    );
-    ydec : entity work.debounce port map (
-        clk => clk,
-        rst => reset,
-        button_state => DATA_Y(6),
-        debounced => acl_ydec
-    );
-
         
     top : process (clk, RESET_SW)
     begin
@@ -286,41 +267,115 @@ begin
                 end if;
 
             else 
-                -- set red block coordinates by ACL data
-                if (acl_xinc = '1') then
-                    -- increment x, wrap to 0 at 19
-                    if (blockx < 19) then
-                        blockx <= blockx + 1;
-                    else
-                        blockx <= x"00";
+                -- set red block coordinates by ACL data, 
+                -- x-y inverted from acl to board orientation,
+                -- considering 7 segment orientation to be proper
+                currx <= signed(DATA_Y);
+                curry <= signed(DATA_X);
+
+                if abs(curry) > 10 then -- 0xf0
+                    if not ytilt_flag = '1' then
+                        ytilt_flag <= '1';
+                        if curry < 0 then
+                            -- decrement y, wrap at 0
+                            if (blocky > 0) then
+                                blocky <= blocky - 1;
+                            else
+                                blocky <= x"0e";
+                            end if;
+                        else
+                            -- increment y
+                            if (blocky < 14) then
+                                blocky <= blocky + 1;
+                            else
+                                blocky <= x"00";
+                            end if;
+                        end if;
                     end if;
-                elsif acl_xdec = '1' then
-                    -- decrement x, wrap to 19 at 0
-                    if (blockx > 0) then
-                        blockx <= blockx - 1;
-                    else
-                        blockx <= x"13";
+                else 
+                    ytilt_flag <= '0';
+                end if;
+                
+                if abs(currx) > 10 then 
+                    if not xtilt_flag = '1' then
+                        xtilt_flag <= '1';
+                        if currx > 0 then 
+                            -- increment x, wrap to 0 at 19
+                            if (blockx < 19) then
+                                blockx <= blockx + 1;
+                            else
+                                blockx <= x"00";
+                            end if;
+                        else 
+                            -- decrement x, wrap to 19 at 0
+                            if (blockx > 0) then
+                                blockx <= blockx - 1;
+                            else
+                                blockx <= x"13";
+                            end if;
+                        end if;
                     end if;
+                else 
+                    xtilt_flag <= '0';
                 end if;
 
-                if acl_yinc = '1' then 
-                    -- increment y, stop at 14
-                    if (blocky < 14) then
-                        blocky <= blocky + 1;
-                    else
-                        blocky <= x"00";
-                    end if;
-                elsif acl_ydec = '1' then
-                    -- decrement y, wrap at 0
-                    if (blocky > 0) then
-                        blocky <= blocky - 1;
-                    else
-                        blocky <= x"0e";
-                    end if;
-                end if;
+
+                            
+                -- if not (DATA_X(7 downto 4) = x"f") then
+                --     if not ytilt_flag = '1' then
+                --         -- we haven't caught this tilt yet
+                --         ytilt_flag <= '1';
+                --         if (DATA_X(7) = '1') then
+                --             -- increment y
+                --             if (blocky < 14) then
+                --                 blocky <= blocky + 1;
+                --             else
+                --                 blocky <= x"00";
+                --             end if;
+                --         else
+                --             -- decrement y, wrap at 0
+                --             if (blocky > 0) then
+                --                 blocky <= blocky - 1;
+                --             else
+                --                 blocky <= x"0e";
+                --             end if;
+                --         end if;
+                --     end if;
+                -- else
+                --     -- board isn't tilted or has returned to flat 0xf2
+                --     ytilt_flag <= '0';
+                -- end if;
+
+                 -- "Y" tilt reads 0x11 at idle
+                -- left tilt reads 0x20s to 0x40s
+                -- right tilt reads 0xe0s to 0xf0s
+                -- if not (DATA_Y(7 downto 4) = x"1") then
+                --     if not xtilt_flag = '1' then
+                --         -- we haven't caught this tilt yet
+                --         xtilt_flag <= '1';
+                --         if (DATA_Y(7) = '1') then 
+                --         -- increment x, wrap to 0 at 19
+                --             if (blockx < 19) then
+                --                 blockx <= blockx + 1;
+                --             else
+                --                 blockx <= x"00";
+                --             end if;
+                --         else 
+                --             -- decrement x, wrap to 19 at 0
+                --             if (blockx > 0) then
+                --                 blockx <= blockx - 1;
+                --             else
+                --                 blockx <= x"13";
+                --             end if;
+                --         end if;
+                --     end if;
+                -- else 
+                --     xtilt_flag <= '0';
+                -- end if;
+
             end if;
-
         end if;
+                
     end process;
 
     -- 7 segment display character assignment
