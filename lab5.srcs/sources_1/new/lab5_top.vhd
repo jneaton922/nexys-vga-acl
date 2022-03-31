@@ -299,7 +299,7 @@ begin
                 if abs(currx) > 10 then 
                     if not xtilt_flag = '1' then
                         xtilt_flag <= '1';
-                        if currx > 0 then 
+                        if currx < 0 then 
                             -- increment x, wrap to 0 at 19
                             if (blockx < 19) then
                                 blockx <= blockx + 1;
